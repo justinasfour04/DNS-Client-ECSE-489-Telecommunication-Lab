@@ -14,11 +14,6 @@ public class DnsQuestion {
 	private byte[] dnsQuestion;
 
 	public DnsQuestion(String qNAME, String qTYPE, short qCLASS) {
-		dnsQuestion = buildDnsQuestion(qNAME, qTYPE, qCLASS);
-	}
-
-	private byte[] buildDnsQuestion(String qNAME, String qTYPE, short qCLASS) {
-
 		switch (qTYPE) {
 		case A_TYPE:
 			this.QTYPE = 0x0001;
@@ -34,17 +29,18 @@ public class DnsQuestion {
 		this.QCLASS = qCLASS;
 		this.QNAME = QNameStringToByteArray(qNAME);
 
-		ByteBuffer dnsQuestion = ByteBuffer.allocate(this.QNAME.length + 2*Short.BYTES);
+		ByteBuffer dnsQuestion = ByteBuffer.allocate(this.QNAME.length + 2
+				* Short.BYTES);
 		dnsQuestion.put(this.QNAME);
 		dnsQuestion.putShort(this.QTYPE);
 		dnsQuestion.putShort(this.QCLASS);
-		return dnsQuestion.array();
+		this.dnsQuestion = dnsQuestion.array();
 	}
 
 	private byte[] QNameStringToByteArray(String qNAME) {
 		String[] qNameMinusPeriods = qNAME.split("[.]");
 		int numberOfLabels = qNameMinusPeriods.length;
-		
+
 		// Loop through domain name and count the number of characters
 		int numberOfCharacters = 0;
 		for (String i : qNameMinusPeriods) {
@@ -68,6 +64,13 @@ public class DnsQuestion {
 		}
 		qNameByteArray.put((byte) 0b0);
 		return qNameByteArray.array();
+	}
+
+	public void parse(byte[] question) {
+		this.QNAME = ByteBuffer.allocate(question.length - 4)
+				.put(question, 0, question.length - 4).array();
+		this.QTYPE = (short) ((question[question.length - 4] << 8) | question[question.length - 3]);
+		this.QCLASS = (short) ((question[question.length - 2] << 8) | question[question.length - 1]);
 	}
 
 	@Override

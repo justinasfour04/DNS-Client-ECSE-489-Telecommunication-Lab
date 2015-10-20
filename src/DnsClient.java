@@ -5,11 +5,12 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
-import java.util.StringTokenizer;
 import java.util.regex.Pattern;
 
 public class DnsClient {
@@ -17,7 +18,8 @@ public class DnsClient {
 	private static final String DEFAULT_TIMEOUT = "5";
 	private static final String DEFAULT_MAX_RETRIES = "3";
 	private static final String DEFAULT_PORT = "53";
-	private static final String DEFAULT_SERVER_TYPE = "A";
+	private static final String DEFAULT_SERVER_TYPE = "a";
+	private static final int MAX_UDP_DNS_BYTE_SIZE = 512;
 
 	private String timeout;
 	private String max_retries;
@@ -25,6 +27,10 @@ public class DnsClient {
 	private String serverType;
 	private String server;
 	private String name;
+
+	private long timeTookToReceivePacket;
+	private int numberOfRetries;
+	private ArrayList<String> error;
 
 	public static void main(String[] args) {
 		DnsClient dns = new DnsClient();
@@ -37,6 +43,7 @@ public class DnsClient {
 		max_retries = DEFAULT_MAX_RETRIES;
 		port = DEFAULT_PORT;
 		serverType = DEFAULT_SERVER_TYPE;
+		error = new ArrayList<String>();
 	}
 
 	/**
@@ -75,15 +82,20 @@ public class DnsClient {
 		// If an argument given does not follow the syntax then
 		// IO exception thrown
 		for (int i = 0; i < args.length; i++) {
-			if (args[i].equals("-t"))
+			if (args[i].equals("-t")) {
 				this.timeout = args[i + 1];
-			else if (args[i].equals("-r"))
+				i++;
+			} else if (args[i].equals("-r")) {
 				this.max_retries = args[i + 1];
-			else if (args[i].equals("-p"))
+				i++;
+			} else if (args[i].equals("-p")) {
 				this.port = args[i + 1];
-			else if (args[i].equals("-mx") || args[i].equals("-ns"))
+				i++;
+			} else if (args[i].equals("-mx") || args[i].equals("-ns")) {
 				this.serverType = args[i].replace("-", "");
-			else
+			} else if (args[i].contains("@")) {
+				break;
+			} else
 				throw new IOException(
 						"Unsupported flag - Supported flags include -t, -r, -p, -mx, -ns");
 		}
@@ -119,6 +131,32 @@ public class DnsClient {
 		return byteIpAddress;
 	}
 
+	private void printOutput(DnsPacketHeader header, DnsQuestion question,
+			DnsAnswer answer) {
+		System.out.println("DnsClient sending request for " + this.name);
+		System.out.println("Server: " + this.server);
+		System.out.println("Request type: " + this.serverType.toUpperCase());
+		System.out.println();
+
+		System.out.println("Response received after "
+				+ this.timeTookToReceivePacket + " milliseconds " + "("
+				+ numberOfRetries + " retries)");
+		System.out.println();
+
+		System.out.println("***Answer Section (" + header.getANCOUNT()
+				+ " records)***");
+
+		System.out.println("***Additional Section (" + header.getARCOUNT()
+				+ " records)***");
+		if (header.getARCOUNT() == 0)
+			System.out.println("NOTFOUND");
+
+		System.out.println();
+		if (error != null)
+			for (String i : error)
+				System.out.println("ERROR" + "	" + i);
+	}
+
 	private void runDnsClient(String[] args) {
 		// Create reader to read user input from command line
 		BufferedReader inCommand = new BufferedReader(new InputStreamReader(
@@ -128,9 +166,9 @@ public class DnsClient {
 		try {
 			parseCommandLine(args);
 		} catch (IOException e) {
+			error.add(e.getMessage());
 			System.err.println(e.getMessage());
-		} catch (ArrayIndexOutOfBoundsException a) {
-			System.err.println("blah");
+			return;
 		}
 
 		// Create the InetAddress by converting the IP argument into 4 bytes
@@ -139,10 +177,11 @@ public class DnsClient {
 			serverIpAddress = InetAddress
 					.getByAddress(convertStringIpAddressToByteIpAddress(server));
 		} catch (UnknownHostException e) {
-			System.err.println("The IP address cannot be resolved");
+			error.add("The IP address cannot be resolved");
+			return;
 		} catch (NullPointerException f) {
-			System.err
-					.println("The IpAddress is missing dotted-decimal entries");
+			error.add("The IpAddress is missing dotted-decimal entries");
+			return;
 		}
 
 		// Create a UDP connection socket
@@ -151,50 +190,105 @@ public class DnsClient {
 		DatagramSocket dnsSocket = null;
 		try {
 			dnsSocket = new DatagramSocket();
+			// Set the timeout in seconds
+			dnsSocket.setSoTimeout(Integer.parseInt(this.timeout) * 1000);
 		} catch (SocketException e) {
-			System.err.println("The socket didn't bind to a port");
+			error.add("The socket didn't bind to a port");
+			return;
 		}
 
-		DnsPacketHeader dnsHeader = new DnsPacketHeader(new Random(
-				Short.MAX_VALUE + 1), qR, oPCODE, aA, tC, rD, rA, z, rCODE,
-				qDCOUNT, aNCOUNT, nSCOUNT, aRCOUNT);
-		DnsQuestion dnsQuestion = new DnsQuestion(this.name, this.serverType,
-				qCLASS);
-		DnsAnswer dnsAnswer = new DnsAnswer(nAME, tYPE, cLASS, tTL, rDLENGTH,
-				rDATA);
-		int capacity = dnsHeader.getDnsHeader().length
-				+ dnsQuestion.getDnsQuestion().length
-				+ dnsAnswer.getDnsAnswer().length;
+		///////////////////////////////////
+		//     Build Packet              //
+		///////////////////////////////////
+		Random id = new Random(Short.MAX_VALUE + 1);
+		DnsPacketHeader dnsHeader = new DnsPacketHeader((short) id.nextInt(),
+				(byte) 0, (byte) 0, (byte) 0, (byte) 0, (byte) 1, (byte) 0,
+				(byte) 0, (byte) 0, (short) 1, (short) 0, (short) 0, (short) 0);
 
-		ByteBuffer dnsDataBuffer = ByteBuffer.allocate(capacity);
+		DnsQuestion dnsQuestion = new DnsQuestion(this.name, this.serverType,
+				(short) 0x0001);
+
+		// Set the size of the answer as the max DNS packet byte - the size of
+		// the other 2 packets
+		int dnsAnswerSize = MAX_UDP_DNS_BYTE_SIZE
+				- dnsHeader.getDnsHeader().length
+				- dnsQuestion.getDnsQuestion().length;
+		DnsAnswer dnsAnswer = new DnsAnswer(dnsAnswerSize);
+
+		ByteBuffer dnsDataBuffer = ByteBuffer.allocate(MAX_UDP_DNS_BYTE_SIZE);
 		dnsDataBuffer.put(dnsHeader.getDnsHeader());
 		dnsDataBuffer.put(dnsQuestion.getDnsQuestion());
 		dnsDataBuffer.put(dnsAnswer.getDnsAnswer());
 
 		byte[] dnsData = dnsDataBuffer.array();
+		
 		// Create the dnsPacket to be sent
 		DatagramPacket dnsPacket = new DatagramPacket(dnsData, dnsData.length,
 				serverIpAddress, Integer.parseInt(this.port));
-		try {
-			// Send the DNS packet
-			dnsSocket.send(dnsPacket);
-		} catch (IOException e) {
-			System.err.println("The DNS packet did not successfully get sent");
-			;
-		}
 
 		// Create the dnsPacket to be received
 		DatagramPacket dnsReceive = new DatagramPacket(dnsData, dnsData.length);
-		try {
-			// Receive the DNS packet
-			dnsSocket.receive(dnsReceive);
-		} catch (IOException e) {
-			System.err.println("The DNS packet wasn't successfully received");
-			;
-		}
 
-		byte[] receivedInfo = Arrays.copyOfRange(dnsReceive.getData(),
-				dnsReceive.getOffset(),
-				dnsReceive.getOffset() + dnsReceive.getLength());
+		// In a do-while to handle max retries if the connection timeout
+		this.numberOfRetries = 0;
+		Exception socketTimeoutError = new Exception();
+		do {
+			try {
+				// Send the DNS packet
+				dnsSocket.send(dnsPacket);
+			} catch (IOException e) {
+				error.add("The DNS packet did not successfully get sent");
+				return;
+			}
+
+			try {
+				// Start timer
+				long startReceive = System.currentTimeMillis();
+				// Receive the DNS packet
+				dnsSocket.receive(dnsReceive);
+				// End timer
+				long endReceive = System.currentTimeMillis();
+				this.timeTookToReceivePacket = endReceive - startReceive;
+			} catch (SocketTimeoutException timeoutError) {
+				// Keep trying until number of retries exceeds max retries
+				socketTimeoutError = timeoutError;
+				numberOfRetries++;
+				if (numberOfRetries >= Integer.parseInt(max_retries)) {
+					error.add("A timeout occured");
+					return;
+				}
+			} catch (IOException e) {
+				error.add("The DNS packet wasn't successfully received");
+				return;
+			}
+		} while (socketTimeoutError instanceof SocketTimeoutException
+				&& numberOfRetries < Integer.parseInt(max_retries));
+
+		// Close the socket
+		dnsSocket.close();
+
+		/////////////////////////////////////
+		//      Parse Received Packet      //
+		/////////////////////////////////////
+		
+		int headerSize = dnsHeader.getDnsHeader().length;
+		int questionSize = dnsQuestion.getDnsQuestion().length;
+		int answerSize = dnsAnswer.getDnsAnswer().length;
+		byte[] newHeader = Arrays.copyOfRange(dnsReceive.getData(), 0,
+				headerSize);
+		byte[] newQuestion = Arrays.copyOfRange(dnsReceive.getData(),
+				headerSize, headerSize + questionSize);
+		byte[] newAnswer = Arrays.copyOfRange(dnsReceive.getData(), headerSize
+				+ questionSize, headerSize + questionSize + answerSize);
+
+		try {
+			dnsHeader.parse(newHeader);
+		} catch (Exception e) {
+			error.add(e.getMessage());
+		}
+		dnsQuestion.parse(newQuestion);
+		dnsAnswer.parse(newAnswer);
+
+		printOutput(dnsHeader, dnsQuestion, dnsAnswer);
 	}
 }

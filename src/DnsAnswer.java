@@ -16,32 +16,17 @@ public class DnsAnswer {
 
 	private byte[] dnsAnswer;
 
-	public DnsAnswer(String nAME, String tYPE, short cLASS, int tTL,
-			short rDLENGTH, int rDATA) {
-		dnsAnswer = buildDnsAnswer(nAME, tYPE, cLASS, tTL, rDLENGTH, rDATA);
+	/**
+	 * Constructor for sending empty answer of certain size
+	 * @param size
+	 */
+	public DnsAnswer(int size) {
+		dnsAnswer = new byte[size];
 	}
 
-	private byte[] buildDnsAnswer(String nAME, String tYPE, short cLASS,
-			int tTL, short rDLENGTH, int rDATA) {
-		
-		this.NAME = nameStringToByteArray(nAME);
-		switch (tYPE) {
-		case A_TYPE:
-			this.QTYPE = 0x0001;
-			break;
-		case NS_TYPE:
-			this.QTYPE = 0x0002;
-			break;
-		case MX_TYPE:
-			this.QTYPE = 0x000f;
-			break;
-		}
-
-		
-
-		byte[] dnsAnswer = new byte[6];
-
-		return dnsAnswer;
+	public void parse(byte[] dnsAnswer) {
+		ByteBuffer answer = ByteBuffer.wrap(dnsAnswer);
+		this.TYPE = 
 	}
 
 	private byte[] nameStringToByteArray(String name) {

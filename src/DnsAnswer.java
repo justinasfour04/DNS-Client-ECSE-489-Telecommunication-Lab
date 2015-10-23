@@ -3,6 +3,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Hashtable;
 
 public class DnsAnswer {
@@ -58,7 +59,7 @@ public class DnsAnswer {
 						Short.toString((short) ((dnsAnswer[i + 4] << 8) | dnsAnswer[i + 5])));
 				answers.put(
 						"TTL",
-						Integer.toString((((dnsAnswer[i + 6] << 24) | dnsAnswer[i + 7]) << 16 | dnsAnswer[i + 8]) << 8
+						Long.toString((((dnsAnswer[i + 6] << 24) | dnsAnswer[i + 7]) << 16 | dnsAnswer[i + 8]) << 8
 								| dnsAnswer[i + 9]));
 				answers.put(
 						"RDLength",
@@ -70,11 +71,18 @@ public class DnsAnswer {
 
 				// CNAME entries
 				if (TYPE == 0x0005) {
-					answers.put(
-							"Name",
-							nameBytetoString(dnsQuestion.getQNAME(),
-									dnsAnswer[i + 13] - SIZE_OF_HEADER));
-					aliasOffset = dnsAnswer[i + 13] - SIZE_OF_HEADER;
+					if (String.format("%02X", dnsAnswer[i + 12]).equals("C0")) {
+						answers.put(
+								"Name",
+								nameBytetoString(dnsQuestion.getQNAME(),
+										dnsAnswer[i + 13] - SIZE_OF_HEADER));
+						aliasOffset = dnsAnswer[i + 13] - SIZE_OF_HEADER;
+					} else
+						answers.put(
+								"Name",
+								nameBytetoString(
+										Arrays.copyOfRange(dnsAnswer, i + 12, i
+												+ 12 + RDLENGTH - 1), 0));
 				}
 
 				// IP entries
@@ -98,27 +106,45 @@ public class DnsAnswer {
 					answers.put(
 							"Preference",
 							Short.toString((short) ((dnsAnswer[i + 12] << 8) | dnsAnswer[i + 13])));
-					ByteBuffer mxNameBuffer = ByteBuffer.allocate(RDLENGTH
-							+ dnsQuestion.getQNAME().length);
+					if (String.format("%02X", dnsAnswer[i + 12 + RDLENGTH - 2]).equals("C0")) {
+						ByteBuffer mxNameBuffer = ByteBuffer.allocate(RDLENGTH
+								+ dnsQuestion.getQNAME().length);
 
-					// Get the alias name
-					String alias = nameBytetoString(dnsQuestion.getQNAME(),
-							aliasOffset);
-					// Convert to bytes
-					byte[] aliasBytes = nameStringToByteArray(alias);
-					// fill buffer with new bytes
-					for (int l = 0; l < RDLENGTH; l++) {
-						if (String.format("%02X", dnsAnswer[i + 14 + l])
-								.equals("C0"))
-							break;
-						mxNameBuffer.put(dnsAnswer[i + 14 + l]);
+						// Get the alias name
+						String alias = nameBytetoString(dnsQuestion.getQNAME(),
+								aliasOffset);
+						// Convert to bytes
+						byte[] aliasBytes = nameStringToByteArray(alias);
+						// fill buffer with new bytes
+						for (int l = 0; l < RDLENGTH; l++) {
+							if (String.format("%02X", dnsAnswer[i + 14 + l])
+									.equals("C0"))
+								break;
+							mxNameBuffer.put(dnsAnswer[i + 14 + l]);
+						}
+					
+
+						// Append the old domain alias bytes to the new ones
+						mxNameBuffer.put(aliasBytes);
+						// Add to the hashtable
+						answers.put("Name",
+								nameBytetoString(mxNameBuffer.array(), 0));
 					}
+					else {
+						ByteBuffer mxNameBuffer = ByteBuffer.allocate(RDLENGTH);
 
-					// Append the old domain alias bytes to the new ones
-					mxNameBuffer.put(aliasBytes);
-					// Add to the hastable
-					answers.put("Name",
-							nameBytetoString(mxNameBuffer.array(), 0));
+						// fill buffer with new bytes
+						for (int l = 0; l < RDLENGTH; l++) {
+							if (String.format("%02X", dnsAnswer[i + 14 + l])
+									.equals("00"))
+								break;
+							mxNameBuffer.put(dnsAnswer[i + 14 + l]);
+						}
+					
+						// Add to the hashtable
+						answers.put("Name",
+								nameBytetoString(mxNameBuffer.array(), 0));
+					}
 				}
 				// NS Type
 				else if (TYPE == 0x0002) {

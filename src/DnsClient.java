@@ -158,10 +158,10 @@ public class DnsClient {
 				.iterator();
 		while (iterator.hasNext()) {
 			Hashtable<String, String> ipInfo = iterator.next();
-			if (Integer.parseInt(ipInfo.get("RDLength")) == 2)
+			if (Integer.parseInt(ipInfo.get("Type")) == 5)
 				System.out.println("CNAME	" + ipInfo.get("Name") + "	"
 						+ ipInfo.get("TTL") + "	" + auth);
-			else if (Integer.parseInt(ipInfo.get("RDLength")) == 4)
+			else if (Integer.parseInt(ipInfo.get("Type")) == 1)
 				System.out.println("IP	" + ipInfo.get("IP") + "	"
 						+ ipInfo.get("TTL") + "	" + auth);
 			else if (Integer.parseInt(ipInfo.get("Type")) == 15)
@@ -222,6 +222,9 @@ public class DnsClient {
 			dnsSocket = new DatagramSocket();
 			// Set the timeout in seconds
 			dnsSocket.setSoTimeout(Integer.parseInt(this.timeout) * 1000);
+		} catch (NumberFormatException n) {
+			System.err.println("ERROR" + "	"
+					+ "The timeout value needs to be a number");
 		} catch (SocketException e) {
 			error.add("ERROR" + "	" + "The socket didn't bind to a port");
 			System.err.println("ERROR" + "	"

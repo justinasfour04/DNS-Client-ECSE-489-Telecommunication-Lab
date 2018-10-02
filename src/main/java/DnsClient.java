@@ -65,7 +65,7 @@ public class DnsClient {
 	 * @param args
 	 * @throws IOException
 	 */
-	private void parseCommandLine(String[] args) throws IOException {
+	private boolean parseCommandLine(String[] args) throws IOException {
 
 		Option timeout = Option.builder("t")
 			.longOpt("timeout")
@@ -132,11 +132,12 @@ public class DnsClient {
 			
 			if (helpCmd.getOptions().length == 1 && helpCmd.hasOption(help.getOpt()) || helpCmd.hasOption(help.getLongOpt())) {
 				helpFormatter.printHelp("dns-client", dnsOptions);
+				return false;
 			} else {
 				cmd = cmdLineParser.parse(dnsOptions, args, false);
 			}
 		}
-		catch( ParseException exp ) {
+		catch(ParseException exp) {
 			// oops, something went wrong
 			System.err.println( "Parsing failed.  Reason: " + exp.getMessage() );
 			helpFormatter.printHelp("dns-client", dnsOptions);
@@ -168,6 +169,8 @@ public class DnsClient {
 			} else
 				throw new IOException(
 						"Please enter the required arguments @a.b.c.d serverName");
+
+		return true;
 	}
 
 	/**
@@ -257,7 +260,9 @@ public class DnsClient {
 
 		// Extract the arguments from the command line
 		try {
-			parseCommandLine(args);
+			if (!parseCommandLine(args)) {
+				return; // help option chosen
+			}
 		} catch (IOException e) {
 			error.add(e.getMessage());
 			System.err.println("ERROR	" + e.getMessage());

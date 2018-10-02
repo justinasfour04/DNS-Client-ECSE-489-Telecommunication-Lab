@@ -1,7 +1,3 @@
-import java.io.NotActiveException;
-import java.rmi.ServerException;
-import java.util.BitSet;
-
 public class DnsPacketHeader {
 
 	private short ID;

@@ -12,8 +12,18 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Hashtable;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Random;
 import java.util.regex.Pattern;
+
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.OptionGroup;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
 
 public class DnsClient {
 
@@ -57,51 +67,107 @@ public class DnsClient {
 	 */
 	private void parseCommandLine(String[] args) throws IOException {
 
-		// Check if there are any command line arguments
-		if (args.length == 0)
-			throw new IOException("Dns Client is missing all arguments");
+		Option timeout = Option.builder("t")
+			.longOpt("timeout")
+			.valueSeparator(' ')
+			.desc("How long to wait before retransmision")
+			.hasArg()
+			.build();
 
-		// Regular expression to find the required IP and Server Name
-		Pattern ip = Pattern
-				.compile("((@)\\d{1,3}[.]\\d{1,3}[.]\\d{1,3}[.]\\d{1,3})");
-		Pattern serverName = Pattern
+		Option maxRetries = Option.builder("r")
+			.longOpt("maxretries")
+			.valueSeparator(' ')
+			.desc("Maximum number of times to retransmit an unanswered query before giving up")
+			.hasArg()
+			.build();
+
+		Option port = Option.builder("p")
+			.longOpt("port")
+			.valueSeparator(' ')
+			.desc("UDP port number of the DNS server")
+			.hasArg()
+			.build();
+
+		Option mx = new Option("mx", "Send a MX (mail server) query, " + 
+			"if neither mx or ns is given then A (IP address) query sent");
+
+		Option ns = new Option("ns", "Send a NS (name server), " + 
+			"if neither mx or ns is given then a type A (IP address) query sent");
+
+		Option server = Option.builder("ip")
+			.desc("The IPv4 address of the DNS server, in a.b.c.d. format")
+			.valueSeparator(' ')
+			.required()
+			.hasArg()
+			.build();
+
+		Option name = Option.builder("n")
+			.longOpt("name")
+			.desc("The domain name to query for")
+			.hasArg()
+			.valueSeparator(' ')
+			.required()
+			.build();
+		
+		Option help = new Option("h", "help", false, "Print the help");
+
+		Options helpOptions = new Options();
+		helpOptions.addOption(help);
+
+		Options dnsOptions = new Options();
+		dnsOptions.addOption(timeout);
+		dnsOptions.addOption(maxRetries);
+		dnsOptions.addOption(port);
+		dnsOptions.addOption(mx);
+		dnsOptions.addOption(ns);
+		dnsOptions.addOption(help);
+		
+		CommandLineParser cmdLineParser = new DefaultParser();
+		
+		CommandLine cmd = null;
+		HelpFormatter helpFormatter = new HelpFormatter();
+		try {
+			// parse the command line arguments
+			CommandLine helpCmd = new DefaultParser().parse(helpOptions, args, true);
+			
+			if (helpCmd.getOptions().length == 1 && helpCmd.hasOption(help.getOpt()) || helpCmd.hasOption(help.getLongOpt())) {
+				helpFormatter.printHelp("dns-client", dnsOptions);
+			} else {
+				cmd = cmdLineParser.parse(dnsOptions, args, false);
+			}
+		}
+		catch( ParseException exp ) {
+			// oops, something went wrong
+			System.err.println( "Parsing failed.  Reason: " + exp.getMessage() );
+			helpFormatter.printHelp("dns-client", dnsOptions);
+		}
+
+		List<String> parsedOptions = cmd.getArgList();
+		String ipAddress = "";
+		String serverName = "";
+		for (String option : parsedOptions) {
+			if (option.charAt(0) == '@') {
+				ipAddress = option.replace("@", "");
+			} else {
+				serverName = option;
+			}
+		}
+
+		// // Regular expression to find the required IP and Server Name
+		Pattern ipPattern = Pattern
+				.compile("(\\d{1,3}[.]\\d{1,3}[.]\\d{1,3}[.]\\d{1,3})");
+		Pattern serverNamePattern = Pattern
 				.compile("([a-z0-9]+(-[a-z0-9]+)*\\.)+[a-z]{2,}");
 
-		// Create string off all arguments after removing the useless characters
-		String commandLineArguments = Arrays.toString(args).replace(",", " ")
-				.replace("[", "").replace("]", "");
-
-		// Checks the String for the required arguments
-		// If not found it throws an exception
-		if (ip.matcher(commandLineArguments.toString()).find())
-			if (serverName.matcher(commandLineArguments.toString()).find()) {
-				this.server = args[args.length - 2].replace("@", "");
-				this.name = args[args.length - 1];
+		// // Checks the String for the required arguments
+		// // If not found it throws an exception
+		if (ipPattern.matcher(ipAddress).find())
+			if (serverNamePattern.matcher(serverName).find()) {
+				this.server = ipAddress;
+				this.name = serverName;
 			} else
 				throw new IOException(
 						"Please enter the required arguments @a.b.c.d serverName");
-
-		// Loop through arguments to find the optional information
-		// If an argument given does not follow the syntax then
-		// IO exception thrown
-		for (int i = 0; i < args.length; i++) {
-			if (args[i].equals("-t")) {
-				this.timeout = args[i + 1];
-				i++;
-			} else if (args[i].equals("-r")) {
-				this.max_retries = args[i + 1];
-				i++;
-			} else if (args[i].equals("-p")) {
-				this.port = args[i + 1];
-				i++;
-			} else if (args[i].equals("-mx") || args[i].equals("-ns")) {
-				this.serverType = args[i].replace("-", "");
-			} else if (args[i].contains("@")) {
-				break;
-			} else
-				throw new IOException(
-						"Unsupported flag - Supported flags include -t, -r, -p, -mx, -ns");
-		}
 	}
 
 	/**
